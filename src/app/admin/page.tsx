@@ -3751,8 +3751,14 @@ const VideoSourceConfig = ({
         throw new Error(data.error || `操作失败: ${resp.status}`);
       }
 
+      // 获取响应数据
+      const data = await resp.json();
+
       // 成功后刷新配置
       await refreshConfig();
+
+      // 返回响应数据供调用者使用
+      return data;
     } catch (err) {
       showError(err instanceof Error ? err.message : '操作失败', showAlert);
       throw err; // 向上抛出方便调用处判断
@@ -4256,15 +4262,44 @@ const VideoSourceConfig = ({
       message: confirmMessage,
       onConfirm: async () => {
         try {
-          await withLoading(`batchSource_${action}`, () =>
+          const result = await withLoading(`batchSource_${action}`, () =>
             callSourceApi({ action, keys })
           );
-          showAlert({
-            type: 'success',
-            title: `${actionName}成功`,
-            message: `${actionName}了 ${keys.length} 个视频源`,
-            timer: 2000,
-          });
+
+          // 根据操作类型和结果显示不同的消息
+          if (action === 'batch_delete' && result?.deleted !== undefined && result?.skipped !== undefined) {
+            const { deleted, skipped } = result;
+            if (skipped > 0) {
+              showAlert({
+                type: 'warning',
+                title: '批量删除完成',
+                message: `成功删除了 ${deleted} 个视频源，跳过了 ${skipped} 个配置文件中的源（不可删除）`,
+                timer: 3000,
+              });
+            } else if (deleted > 0) {
+              showAlert({
+                type: 'success',
+                title: '批量删除成功',
+                message: `成功删除了 ${deleted} 个视频源`,
+                timer: 2000,
+              });
+            } else {
+              showAlert({
+                type: 'warning',
+                title: '无法删除',
+                message: '所选视频源均为配置文件中的源，不可删除',
+                timer: 3000,
+              });
+            }
+          } else {
+            showAlert({
+              type: 'success',
+              title: `${actionName}成功`,
+              message: `${actionName}了 ${keys.length} 个视频源`,
+              timer: 2000,
+            });
+          }
+
           // 重置选择状态
           setSelectedSources(new Set());
         } catch (err) {
