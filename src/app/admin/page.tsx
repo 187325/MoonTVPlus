@@ -3445,6 +3445,7 @@ const EmbyConfigComponent = ({
   const [sources, setSources] = useState<any[]>([]);
   const [editingSource, setEditingSource] = useState<any | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
 
   // 表单状态
   const [formData, setFormData] = useState({
@@ -3694,6 +3695,81 @@ const EmbyConfigComponent = ({
     });
   };
 
+  // 批量启用
+  const handleBatchEnable = async () => {
+    if (selectedSources.size === 0) return;
+    await withLoading('batchEnableEmby', async () => {
+      try {
+        const newSources = sources.map(s =>
+          selectedSources.has(s.key) ? { ...s, enabled: true } : s
+        );
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...config, EmbyConfig: { Sources: newSources } }),
+        });
+        if (!response.ok) throw new Error('批量启用失败');
+        await refreshConfig();
+        setSelectedSources(new Set());
+        showSuccess(`已启用 ${selectedSources.size} 个源`, showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '批量启用失败', showAlert);
+      }
+    });
+  };
+
+  // 批量禁用
+  const handleBatchDisable = async () => {
+    if (selectedSources.size === 0) return;
+    await withLoading('batchDisableEmby', async () => {
+      try {
+        const newSources = sources.map(s =>
+          selectedSources.has(s.key) ? { ...s, enabled: false } : s
+        );
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...config, EmbyConfig: { Sources: newSources } }),
+        });
+        if (!response.ok) throw new Error('批量禁用失败');
+        await refreshConfig();
+        setSelectedSources(new Set());
+        showSuccess(`已禁用 ${selectedSources.size} 个源`, showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '批量禁用失败', showAlert);
+      }
+    });
+  };
+
+  // 批量删除
+  const handleBatchDelete = async () => {
+    if (selectedSources.size === 0) return;
+    showAlert({
+      type: 'warning',
+      title: '确认批量删除',
+      message: `确定要删除选中的 ${selectedSources.size} 个源吗？此操作不可恢复。`,
+      showConfirm: true,
+      onConfirm: async () => {
+        await withLoading('batchDeleteEmby', async () => {
+          try {
+            const newSources = sources.filter(s => !selectedSources.has(s.key));
+            const response = await fetch('/api/admin/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...config, EmbyConfig: { Sources: newSources } }),
+            });
+            if (!response.ok) throw new Error('批量删除失败');
+            await refreshConfig();
+            setSelectedSources(new Set());
+            showSuccess(`已删除 ${selectedSources.size} 个源`, showAlert);
+          } catch (error) {
+            showError(error instanceof Error ? error.message : '批量删除失败', showAlert);
+          }
+        });
+      },
+    });
+  };
+
   return (
     <div className='space-y-6'>
       <AlertModal
@@ -3713,13 +3789,50 @@ const EmbyConfigComponent = ({
           <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100'>
             Emby 源列表 ({sources.length})
           </h3>
-          <button
-            onClick={handleAdd}
-            className={buttonStyles.success}
-          >
-            添加新源
-          </button>
+          <div className='flex gap-2'>
+            <button
+              onClick={handleAdd}
+              className={buttonStyles.success}
+            >
+              添加新源
+            </button>
+          </div>
         </div>
+
+        {selectedSources.size > 0 && (
+          <div className='flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg'>
+            <span className='text-sm text-gray-700 dark:text-gray-300'>
+              已选择 {selectedSources.size} 项
+            </span>
+            <button
+              onClick={handleBatchEnable}
+              disabled={isLoading('batchEnableEmby')}
+              className={buttonStyles.successSmall}
+            >
+              批量启用
+            </button>
+            <button
+              onClick={handleBatchDisable}
+              disabled={isLoading('batchDisableEmby')}
+              className={buttonStyles.warningSmall}
+            >
+              批量禁用
+            </button>
+            <button
+              onClick={handleBatchDelete}
+              disabled={isLoading('batchDeleteEmby')}
+              className={buttonStyles.dangerSmall}
+            >
+              批量删除
+            </button>
+            <button
+              onClick={() => setSelectedSources(new Set())}
+              className={buttonStyles.secondarySmall}
+            >
+              取消选择
+            </button>
+          </div>
+        )}
 
         {sources.length === 0 ? (
           <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
@@ -3732,37 +3845,53 @@ const EmbyConfigComponent = ({
               className='border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800'
             >
               <div className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
-                <div className='flex-1'>
-                  <div className='flex items-center gap-3 flex-wrap'>
-                    <h4 className='text-base font-medium text-gray-900 dark:text-gray-100'>
-                      {source.name}
-                    </h4>
-                    {source.isDefault && (
-                      <span className='px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200 rounded'>
-                        默认
+                <div className='flex items-center gap-3 flex-1'>
+                  <input
+                    type='checkbox'
+                    checked={selectedSources.has(source.key)}
+                    onChange={(e) => {
+                      const newSelected = new Set(selectedSources);
+                      if (e.target.checked) {
+                        newSelected.add(source.key);
+                      } else {
+                        newSelected.delete(source.key);
+                      }
+                      setSelectedSources(newSelected);
+                    }}
+                    className='w-4 h-4 text-blue-600 rounded border-gray-300 dark:border-gray-600'
+                  />
+                  <div className='flex-1'>
+                    <div className='flex items-center gap-3 flex-wrap'>
+                      <h4 className='text-base font-medium text-gray-900 dark:text-gray-100'>
+                        {source.name}
+                      </h4>
+                      {source.isDefault && (
+                        <span className='px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200 rounded'>
+                          默认
+                        </span>
+                      )}
+                      <span
+                        className={`px-2 py-0.5 text-xs font-medium rounded ${
+                          source.enabled
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
+                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {source.enabled ? '已启用' : '已禁用'}
                       </span>
-                    )}
-                    <span
-                      className={`px-2 py-0.5 text-xs font-medium rounded ${
-                        source.enabled
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
-                          : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
-                      }`}
-                    >
-                      {source.enabled ? '已启用' : '已禁用'}
-                    </span>
-                  </div>
-                  <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
-                    标识符: {source.key}
-                  </p>
-                  <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
-                    服务器: {source.ServerURL}
-                  </p>
-                  {source.UserId && (
+                    </div>
                     <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
-                      用户ID: {source.UserId}
+                      标识符: {source.key}
                     </p>
-                  )}
+                    <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                      服务器: {source.ServerURL}
+                    </p>
+                    {source.UserId && (
+                      <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                        用户ID: {source.UserId}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className='flex gap-2 flex-wrap sm:flex-nowrap'>
                   <button
